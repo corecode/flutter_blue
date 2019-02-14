@@ -104,12 +104,13 @@ class FlutterBlue {
         .then((p) => p.map((d) => BluetoothDevice.fromProto(d)).toList());
   }
 
-  /// Starts a scan for Bluetooth Low Energy devices and returns a stream
-  /// of the [ScanResult] results as they are received.
-  ///
-  /// timeout calls stopStream after a specified [Duration].
-  /// You can also get a list of ongoing results in the [scanResults] stream.
-  /// If scanning is already in progress, this will throw an [Exception].
+  /// Sets a unique id (required on iOS for restoring app on background-scan)
+  /// should be called before any other methods.
+  Future setUniqueId(String uniqueid) =>
+      _channel.invokeMethod('setUniqueId', uniqueid.toString());
+
+  /// Starts a scan for Bluetooth Low Energy devices
+  /// Timeout closes the stream after a specified [Duration]
   Stream<ScanResult> scan({
     ScanMode scanMode = ScanMode.lowLatency,
     List<Guid> withServices = const [],

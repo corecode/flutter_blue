@@ -176,7 +176,13 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                 result.success(null);
                 break;
             }
-
+            
+            case "setUniqueId":
+            {
+                result.success(null);
+                break;
+            }
+            
             case "state":
             {
                 Protos.BluetoothState.Builder p = Protos.BluetoothState.newBuilder();
