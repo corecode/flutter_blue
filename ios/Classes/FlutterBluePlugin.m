@@ -171,6 +171,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     NSString *remoteId = [call arguments];
     @try {
       CBPeripheral *peripheral = [self findPeripheral:remoteId];
+
+      if([peripheral state] != CBPeripheralStateConnected) {
+        NSLog(@"discoverServices ignoring non-connected peripheral");
+        result(nil);
+        return;
+      }
+
       // Clear helper arrays
       [_servicesThatNeedDiscovered removeAllObjects];
       [_characteristicsThatNeedDiscovered removeAllObjects ];
@@ -194,6 +201,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     @try {
       // Find peripheral
       CBPeripheral *peripheral = [self findPeripheral:remoteId];
+
+      if([peripheral state] != CBPeripheralStateConnected) {
+        NSLog(@"readCharacteristic ignoring non-connected peripheral");
+        result(nil);
+        return;
+      }
+
       // Find characteristic
       CBCharacteristic *characteristic = [self locateCharacteristic:[request characteristicUuid] peripheral:peripheral serviceId:[request serviceUuid] secondaryServiceId:[request secondaryServiceUuid]];
       // Trigger a read
@@ -209,6 +223,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     @try {
       // Find peripheral
       CBPeripheral *peripheral = [self findPeripheral:remoteId];
+
+      if([peripheral state] != CBPeripheralStateConnected) {
+        NSLog(@"readDescriptor ignoring non-connected peripheral");
+        result(nil);
+        return;
+      }
+
       // Find characteristic
       CBCharacteristic *characteristic = [self locateCharacteristic:[request characteristicUuid] peripheral:peripheral serviceId:[request serviceUuid] secondaryServiceId:[request secondaryServiceUuid]];
       // Find descriptor
@@ -225,6 +246,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     @try {
       // Find peripheral
       CBPeripheral *peripheral = [self findPeripheral:remoteId];
+
+      if([peripheral state] != CBPeripheralStateConnected) {
+        NSLog(@"writeCharacteristic ignoring non-connected peripheral");
+        result(nil);
+        return;
+      }
+
       // Find characteristic
       CBCharacteristic *characteristic = [self locateCharacteristic:[request characteristicUuid] peripheral:peripheral serviceId:[request serviceUuid] secondaryServiceId:[request secondaryServiceUuid]];
       // Get correct write type
@@ -242,6 +270,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     @try {
       // Find peripheral
       CBPeripheral *peripheral = [self findPeripheral:remoteId];
+
+      if([peripheral state] != CBPeripheralStateConnected) {
+        NSLog(@"writeDescriptor ignoring non-connected peripheral");
+        result(nil);
+        return;
+      }
+
       // Find characteristic
       CBCharacteristic *characteristic = [self locateCharacteristic:[request characteristicUuid] peripheral:peripheral serviceId:[request serviceUuid] secondaryServiceId:[request secondaryServiceUuid]];
       // Find descriptor
@@ -259,6 +294,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     @try {
       // Find peripheral
       CBPeripheral *peripheral = [self findPeripheral:remoteId];
+
+      if([peripheral state] != CBPeripheralStateConnected) {
+        NSLog(@"setNotification ignoring non-connected peripheral");
+        result(nil);
+        return;
+      }
+
       // Find characteristic
       CBCharacteristic *characteristic = [self locateCharacteristic:[request characteristicUuid] peripheral:peripheral serviceId:[request serviceUuid] secondaryServiceId:[request secondaryServiceUuid]];
       // Set notification value
