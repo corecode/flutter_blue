@@ -34,6 +34,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 @property(nonatomic, retain) FlutterMethodChannel *channel;
 @property(nonatomic, retain) FlutterBlueStreamHandler *stateStreamHandler;
 @property(nonatomic, retain) CBCentralManager *centralManager;
+@property(nonatomic, retain) NSArray *restoredPeripherals;
 @property(nonatomic) NSMutableDictionary *scannedPeripherals;
 @property(nonatomic) NSMutableArray *servicesThatNeedDiscovered;
 @property(nonatomic) NSMutableArray *characteristicsThatNeedDiscovered;
@@ -49,6 +50,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
   FlutterEventChannel* stateChannel = [FlutterEventChannel eventChannelWithName:NAMESPACE @"/state" binaryMessenger:[registrar messenger]];
   FlutterBluePlugin* instance = [[FlutterBluePlugin alloc] init];
   instance.channel = channel;
+  instance.restoredPeripherals = [NSArray new];
   instance.scannedPeripherals = [NSMutableDictionary new];
   instance.servicesThatNeedDiscovered = [NSMutableArray new];
   instance.characteristicsThatNeedDiscovered = [NSMutableArray new];
@@ -64,8 +66,11 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 
 - (CBCentralManager*)centralManager{
   if (!_centralManager){
+    NSLog(@"Initializing CBCentral Manager with FLUTTER_BLUE_CBCM_ID");
+
+    // Support only one central manager unique id
     _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil
-            options:_uniqueId ? @{CBCentralManagerOptionRestoreIdentifierKey: _uniqueId} : @{}];
+            options: @{CBCentralManagerOptionRestoreIdentifierKey: @"FLUTTER_BLUE_CBCM_ID"}];
   }
   return _centralManager;
 }
@@ -124,8 +129,28 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
   } else if([@"getConnectedDevices" isEqualToString:call.method]) {
     // Cannot pass blank UUID list for security reasons. Assume all devices have the Generic Access service 0x1800
     NSArray *periphs = [self.centralManager retrieveConnectedPeripheralsWithServices:@[[CBUUID UUIDWithString:@"1800"]]];
-    NSLog(@"getConnectedDevices periphs size: %lu", [periphs count]);
-    result([self toFlutterData:[self toConnectedDeviceResponseProto:periphs]]);
+
+    // The first get connected call should be sure to expose the restored peripeherals
+    NSMutableArray *connectedPeripherals = [NSMutableArray arrayWithArray: _restoredPeripherals];
+    _restoredPeripherals = [NSArray new];
+    for(int i = 0 ; i < [periphs count]; i++) {
+      BOOL contains = @(NO);
+      CBPeripheral* p0 = [periphs objectAtIndex: i];
+      for(int j = 0; j < [connectedPeripherals count]; j++) {
+        CBPeripheral* p1 = [connectedPeripherals objectAtIndex: j];
+        if([[p0 identifier] isEqual: [p1 identifier]]) {
+          contains = @(NO);
+          break;
+        }
+      }
+
+      if(!contains) {
+        [connectedPeripherals addObject: p0];
+      }
+    }
+
+    NSLog(@"getConnectedDevices periphs size: %lu", [connectedPeripherals count]);
+    result([self toFlutterData:[self toConnectedDeviceResponseProto:connectedPeripherals]]);
   } else if([@"connect" isEqualToString:call.method]) {
     FlutterStandardTypedData *data = [call arguments];
     ProtosConnectRequest *request = [[ProtosConnectRequest alloc] initWithData:[data data] error:nil];
@@ -434,8 +459,20 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
   }
 }
 
-- (void)centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *, id> *)dict {
+- (void)centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *, id> *)state {
   NSLog(@"willRestoreState");
+
+  [self centralManager];
+
+  NSArray *peripherals = state[CBCentralManagerRestoredStatePeripheralsKey];
+  for(CBPeripheral *p in peripherals) {
+    p.delegate = self;
+    // [self.scannedPeripherals setObject:p forKey:[[p identifier] UUIDString]];
+    // ProtosScanResult *result = [self toScanResultProto:p advertisementData:@{} RSSI:0];
+    // [_channel invokeMethod:@"ScanResult" arguments:[self toFlutterData:result]];
+  } 
+
+  _restoredPeripherals = [peripherals copy];
 }
 
 
