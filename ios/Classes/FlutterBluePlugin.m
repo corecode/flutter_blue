@@ -42,6 +42,9 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 @property(nonatomic) NSString *uniqueId;
 @end
 
+CBCentralManager* CENTRAL_MANAGER = NULL;
+FlutterBluePlugin* INSTANCE = NULL;
+
 @implementation FlutterBluePlugin
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   FlutterMethodChannel* channel = [FlutterMethodChannel
@@ -62,17 +65,25 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
   instance.stateStreamHandler = stateStreamHandler;
 
   [registrar addMethodCallDelegate:instance channel:channel];
+
+  NSLog(@"Prepared FlutterBluePlugin instance for global CBCentralManager at %p", instance);
+  INSTANCE = instance;
+}
+
++ (CBCentralManager*) prepCentralManager{
+  if (!CENTRAL_MANAGER){
+    NSLog(@"Initializing CBCentralManager with FLUTTER_BLUE_CBCM_ID for %p", INSTANCE);
+
+    // Support only one central manager unique id
+    CENTRAL_MANAGER = [[CBCentralManager alloc] initWithDelegate:INSTANCE queue:nil
+            options: @{CBCentralManagerOptionRestoreIdentifierKey: @"FLUTTER_BLUE_CBCM_ID"}];
+  }
+
+  return CENTRAL_MANAGER;
 }
 
 - (CBCentralManager*)centralManager{
-  if (!_centralManager){
-    NSLog(@"Initializing CBCentral Manager with FLUTTER_BLUE_CBCM_ID");
-
-    // Support only one central manager unique id
-    _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil
-            options: @{CBCentralManagerOptionRestoreIdentifierKey: @"FLUTTER_BLUE_CBCM_ID"}];
-  }
-  return _centralManager;
+  return [FlutterBluePlugin prepCentralManager];
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
@@ -134,12 +145,12 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     NSMutableArray *connectedPeripherals = [NSMutableArray arrayWithArray: _restoredPeripherals];
     _restoredPeripherals = [NSArray new];
     for(int i = 0 ; i < [periphs count]; i++) {
-      BOOL contains = @(NO);
+      BOOL contains = NO;
       CBPeripheral* p0 = [periphs objectAtIndex: i];
       for(int j = 0; j < [connectedPeripherals count]; j++) {
         CBPeripheral* p1 = [connectedPeripherals objectAtIndex: j];
         if([[p0 identifier] isEqual: [p1 identifier]]) {
-          contains = @(NO);
+          contains = YES;
           break;
         }
       }
@@ -149,7 +160,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
       }
     }
 
-    NSLog(@"getConnectedDevices periphs size: %lu", [connectedPeripherals count]);
+    NSLog(@"getConnectedDevices periphs size: %tu", [connectedPeripherals count]);
     result([self toFlutterData:[self toConnectedDeviceResponseProto:connectedPeripherals]]);
   } else if([@"connect" isEqualToString:call.method]) {
     FlutterStandardTypedData *data = [call arguments];
@@ -459,12 +470,12 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
   }
 }
 
-- (void)centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *, id> *)state {
+- (void)centralManager:(CBCentralManager *)central willRestoreState:(NSDictionary<NSString *,id> *)dict {
   NSLog(@"willRestoreState");
 
   [self centralManager];
 
-  NSArray *peripherals = state[CBCentralManagerRestoredStatePeripheralsKey];
+  NSArray *peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey];
   for(CBPeripheral *p in peripherals) {
     p.delegate = self;
     // [self.scannedPeripherals setObject:p forKey:[[p identifier] UUIDString]];
