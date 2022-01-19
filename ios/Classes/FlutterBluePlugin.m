@@ -477,10 +477,8 @@ FlutterBluePlugin* INSTANCE = NULL;
 
   NSArray *peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey];
   for(CBPeripheral *p in peripherals) {
-    p.delegate = self;
-    // [self.scannedPeripherals setObject:p forKey:[[p identifier] UUIDString]];
-    // ProtosScanResult *result = [self toScanResultProto:p advertisementData:@{} RSSI:0];
-    // [_channel invokeMethod:@"ScanResult" arguments:[self toFlutterData:result]];
+    [p setDelegate: self];
+    [p discoverServices: nil];
   } 
 
   _restoredPeripherals = [peripherals copy];
@@ -505,6 +503,9 @@ FlutterBluePlugin* INSTANCE = NULL;
 
   // Send connection state
   [_channel invokeMethod:@"DeviceState" arguments:[self toFlutterData:[self toDeviceStateProto:peripheral state:peripheral.state]]];
+
+  // Send name change
+  [_channel invokeMethod:@"DeviceConnected" arguments:[self toFlutterData:[self toDeviceProto:peripheral]]];
 }
 
 - (void)centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
