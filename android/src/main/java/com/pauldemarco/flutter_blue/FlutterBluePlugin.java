@@ -4,6 +4,13 @@
 
 package com.pauldemarco.flutter_blue;
 
+import static android.bluetooth.BluetoothGattCharacteristic.PROPERTY_SIGNED_WRITE;
+import static android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE;
+import static android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE;
+import static android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;
+import static android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE;
+import static android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_SIGNED;
+
 import android.Manifest;
 import android.annotation.TargetApi;
 import android.app.Application;
@@ -36,14 +43,17 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
@@ -60,7 +70,8 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener;
 
-/** FlutterBluePlugin */
+/** FlutterBlue2Plugin */
+@RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
 public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, RequestPermissionsResultListener, ActivityAware {
     private static final String TAG = "FlutterBluePlugin";
     private final Object initializationLock = new Object();
@@ -422,7 +433,7 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                     return;
                 }
 
-                if(gattServer.readCharacteristic(characteristic)) {
+                if(readCharacteristic(gattServer, characteristic)) {
                     result.success(null);
                 } else {
                     result.error("read_characteristic_error", "unknown reason, may occur if readCharacteristic was called before last read finished.", null);
@@ -483,18 +494,8 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                 }
 
                 // Set characteristic to new value
-                if(!characteristic.setValue(request.getValue().toByteArray())){
-                    result.error("write_characteristic_error", "could not set the local value of characteristic", null);
-                }
-
-                // Apply the correct write type
-                if(request.getWriteType() == Protos.WriteCharacteristicRequest.WriteType.WITHOUT_RESPONSE) {
-                    characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-                } else {
-                    characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
-                }
-
-                if(!gattServer.writeCharacteristic(characteristic)){
+                byte[] value = request.getValue().toByteArray();
+                if(!writeCharacteristic(gattServer, characteristic, value)) {
                     result.error("write_characteristic_error", "writeCharacteristic failed", null);
                     return;
                 }
@@ -568,8 +569,6 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                     return;
                 }
 
-                byte[] value = null;
-
                 if(request.getEnable()) {
                     boolean canNotify = (characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_NOTIFY) > 0;
                     boolean canIndicate = (characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_INDICATE) > 0;
@@ -577,32 +576,63 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                         result.error("set_notification_error", "the characteristic cannot notify or indicate", null);
                         return;
                     }
-                    if(canIndicate) {
-                        value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE;
-                    }
-                    if(canNotify) {
-                        value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
-                    }
-                } else {
-                    value = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
                 }
 
-                if(!gattServer.setCharacteristicNotification(characteristic, request.getEnable())){
-                    result.error("set_notification_error", "could not set characteristic notifications to :" + request.getEnable(), null);
+                // Queue Runnable to turn on/off the notification now that all checks have been passed
+                boolean success = commandQueue.add(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!gattServer.setCharacteristicNotification(characteristic, request.getEnable())) {
+                            completedCommand();
+                            Log.e(TAG, String.format("set_notification_error: could not set characteristic notifications to : %b" + request.getEnable()));
+                            return;
+                        }
+
+                        byte[] value = null;
+
+                        if(request.getEnable()) {
+                            boolean canNotify = (characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_NOTIFY) > 0;
+                            boolean canIndicate = (characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_INDICATE) > 0;
+                            if(!canIndicate && !canNotify) {
+                                completedCommand();
+                                return;
+                            }
+                            if(canIndicate) {
+                                value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE;
+                            }
+                            if(canNotify) {
+                                value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+                            }
+                        } else {
+                            value = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
+                        }
+
+                        if (cccDescriptor != null) {
+                            if (!cccDescriptor.setValue(value)) {
+                                Log.e(TAG, String.format("set_notification_error: could not set local value of cccDescriptor"));
+                                completedCommand();
+                                return;
+                            }
+
+                            if (!gattServer.writeDescriptor(cccDescriptor)) {
+                                Log.e(TAG, String.format("set_notification_error: could not write cccDescriptor"));
+                                completedCommand();
+                                return;
+                            }
+
+                            // callback will fire
+                        } else {
+                            completedCommand();
+                        }
+                    }
+                });
+
+                if(!success) {
+                    result.error("set_notification_error", "error when enqueuing set notification", null);
                     return;
                 }
 
-                if(cccDescriptor != null) {
-                    if (!cccDescriptor.setValue(value)) {
-                        result.error("set_notification_error", "error when setting the descriptor value to: " + Arrays.toString(value), null);
-                        return;
-                    }
-
-                    if (!gattServer.writeDescriptor(cccDescriptor)) {
-                        result.error("set_notification_error", "error when writing the descriptor", null);
-                        return;
-                    }
-                }
+                nextCommand();
 
                 result.success(null);
                 break;
@@ -909,6 +939,10 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                 if(!mDevices.containsKey(gatt.getDevice().getAddress())) {
                     gatt.close();
                 }
+            } else if(newState == BluetoothProfile.STATE_CONNECTED) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    gatt.requestMtu(512);
+                }
             }
             invokeMethodUIThread("DeviceState", ProtoMaker.from(gatt.getDevice(), newState).toByteArray());
         }
@@ -919,6 +953,13 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
             Protos.DiscoverServicesResult.Builder p = Protos.DiscoverServicesResult.newBuilder();
             p.setRemoteId(gatt.getDevice().getAddress());
             for(BluetoothGattService s : gatt.getServices()) {
+                // BluetoothGatt may cache values differently across Android devices
+                for(BluetoothGattCharacteristic c : s.getCharacteristics()) {
+                    c.setValue(new byte[0]);
+                    for(BluetoothGattDescriptor d : c.getDescriptors()) {
+                        d.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
+                    }
+                }
                 p.addServices(ProtoMaker.from(gatt.getDevice(), s, gatt));
             }
             invokeMethodUIThread("DiscoverServicesResult", p.build().toByteArray());
@@ -927,6 +968,7 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             log(LogLevel.DEBUG, "[onCharacteristicRead] uuid: " + characteristic.getUuid().toString() + " status: " + status);
+            completedCommand();
             Protos.ReadCharacteristicResponse.Builder p = Protos.ReadCharacteristicResponse.newBuilder();
             p.setRemoteId(gatt.getDevice().getAddress());
             p.setCharacteristic(ProtoMaker.from(gatt.getDevice(), characteristic, gatt));
@@ -936,6 +978,7 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
             log(LogLevel.DEBUG, "[onCharacteristicWrite] uuid: " + characteristic.getUuid().toString() + " status: " + status);
+            completedCommand();
             Protos.WriteCharacteristicRequest.Builder request = Protos.WriteCharacteristicRequest.newBuilder();
             request.setRemoteId(gatt.getDevice().getAddress());
             request.setCharacteristicUuid(characteristic.getUuid().toString());
@@ -985,7 +1028,8 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
 
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-            log(LogLevel.DEBUG, "[onDescriptorWrite] uuid: " + descriptor.getUuid().toString() + " status: " + status);
+            log(LogLevel.DEBUG, "[onDescriptorWrite] uuid: " + descriptor.getUuid().toString() + " status: " + status + " value: " + bytesToHex(descriptor.getValue()));
+            completedCommand();
             Protos.WriteDescriptorRequest.Builder request = Protos.WriteDescriptorRequest.newBuilder();
             request.setRemoteId(gatt.getDevice().getAddress());
             request.setDescriptorUuid(descriptor.getUuid().toString());
@@ -1033,6 +1077,144 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
         }
     };
 
+    private Queue<Runnable> commandQueue = new LinkedList<>();
+    private boolean commandQueueBusy;
+    Handler bleHandler = new Handler(Looper.getMainLooper());
+
+    private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
+    public static String bytesToHex(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+        for (int j = 0; j < bytes.length; j++) {
+            int v = bytes[j] & 0xFF;
+            hexChars[j * 2] = HEX_ARRAY[v >>> 4];
+            hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
+        }
+        return new String(hexChars);
+    }
+
+    private boolean readCharacteristic(BluetoothGatt gattServer, BluetoothGattCharacteristic characteristic) {
+        if ((characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) == 0) {
+            return false;
+        }
+
+        // Enqueue the read command now that all checks have been passed
+        boolean result = commandQueue.add(new Runnable() {
+            @Override
+            public void run() {
+                // Check if we still have a valid gatt object
+                if (gattServer == null) {
+                    Log.e(TAG, String.format("ERROR: GATT is 'null' for peripheral, clearing command queue"));
+                    commandQueue.clear();
+                    commandQueueBusy = false;
+                    return;
+                }
+
+                if(!gattServer.readCharacteristic(characteristic)) {
+                    Log.e(TAG, String.format("ERROR: readCharacteristic failed for characteristic: %s", characteristic.getUuid()));
+                    completedCommand();
+                }
+            }
+        });
+
+        if(result) {
+            nextCommand();
+        } else {
+            Log.e(TAG, "ERROR: Could not enqueue read characteristic command");
+        }
+        return result;
+    }
+
+    private boolean writeCharacteristic(BluetoothGatt gattServer, BluetoothGattCharacteristic characteristic, byte[] value) {
+        // Check if this characteristic actually supports this writeType
+        int writeProperty;
+        int writeType = characteristic.getWriteType();
+        switch (writeType) {
+            case WRITE_TYPE_DEFAULT: writeProperty = PROPERTY_WRITE; break;
+            case WRITE_TYPE_NO_RESPONSE : writeProperty = PROPERTY_WRITE_NO_RESPONSE; break;
+            case WRITE_TYPE_SIGNED : writeProperty = PROPERTY_SIGNED_WRITE; break;
+            default: writeProperty = 0; break;
+        }
+
+        if((characteristic.getProperties() & writeProperty) == 0 ) {
+            Log.e(TAG, String.format(Locale.ENGLISH,"ERROR: Characteristic <%s> does not support writeType '%d'", characteristic.getUuid(), writeType));
+            return false;
+        }
+
+        // Copy the byte array so we have a threadsafe copy
+        final byte[] finalValue = new byte[value.length];
+        System.arraycopy(value, 0, finalValue, 0, value.length );
+
+        // Enqueue the read command now that all checks have been passed
+        boolean result = commandQueue.add(new Runnable() {
+            @Override
+            public void run() {
+                // Check if we still have a valid gatt object
+                if (gattServer == null) {
+                    Log.e(TAG, String.format("ERROR: GATT is 'null' for peripheral, clearing command queue"));
+                    commandQueue.clear();
+                    commandQueueBusy = false;
+                    return;
+                }
+
+                // Prep the value to send
+                if(!characteristic.setValue(finalValue)) {
+                    Log.e(TAG, String.format("ERROR: writeCharacteristic failed to set local value for characteristic: %s", characteristic.getUuid()));
+                    completedCommand();
+                    return;
+                }
+
+                // Use this type of write, reset each time in case different from last time
+                characteristic.setWriteType(writeType);
+
+                // Send the current value in the characteristic
+                if(!gattServer.writeCharacteristic(characteristic)) {
+                    Log.e(TAG, String.format("ERROR: writeCharacteristic failed for characteristic: %s", characteristic.getUuid()));
+                    completedCommand();
+                    return;
+                }
+            }
+        });
+
+        if(result) {
+            nextCommand();
+        } else {
+            Log.e(TAG, "ERROR: Could not enqueue read characteristic command");
+        }
+        return result;
+    }
+
+
+    private void nextCommand() {
+        // If there is still a command being executed then bail out
+        if(commandQueueBusy) {
+            return;
+        }
+
+        // Execute the next command in the queue
+        if (commandQueue.size() > 0) {
+            final Runnable bluetoothCommand = commandQueue.peek();
+            commandQueueBusy = true;
+
+            bleHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        bluetoothCommand.run();
+                    } catch (Exception ex) {
+                        Log.e(TAG, String.format("ERROR: Command exception"), ex);
+                    }
+                }
+            });
+        }
+    }
+
+    private void completedCommand() {
+        commandQueueBusy = false;
+        commandQueue.poll();
+        nextCommand();
+    }
+
+
     private void log(LogLevel level, String message) {
         if(level.ordinal() <= logLevel.ordinal()) {
             Log.d(TAG, message);
@@ -1066,7 +1248,7 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
 
         BluetoothDeviceCache(BluetoothGatt gatt) {
             this.gatt = gatt;
-            mtu = 20;
+            mtu = 512;
         }
     }
 
