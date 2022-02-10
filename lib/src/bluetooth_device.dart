@@ -6,7 +6,8 @@ part of flutter_blue;
 
 class BluetoothDevice {
   final DeviceIdentifier id;
-  final String name;
+  // This changes if the peripheral changes name. The GAP and GATT name may differ in advertisement or be cached
+  String name;
   final BluetoothDeviceType type;
 
   BluetoothDevice.fromProto(protos.BluetoothDevice p)
@@ -44,6 +45,17 @@ class BluetoothDevice {
     timer?.cancel();
 
     completer.complete();
+
+    final newName = await FlutterBlue.instance._methodStream
+        .where((m) => m.method == "DeviceConnected")
+        .map((m) => m.arguments)
+        .map((buffer) => new protos.BluetoothDevice.fromBuffer(buffer))
+        .where((p) => p.remoteId == id.toString())
+        .map((p) => p.name)
+        .first;
+    if (newName.isNotEmpty) {
+      name = newName;
+    }
 
     return completer.future;
   }
