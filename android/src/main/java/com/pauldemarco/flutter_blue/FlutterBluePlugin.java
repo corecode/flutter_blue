@@ -943,6 +943,7 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     gatt.requestMtu(512);
                 }
+		invokeMethodUIThread("DeviceConnected", ProtoMaker.from(gatt.getDevice()).toByteArray());
             }
             invokeMethodUIThread("DeviceState", ProtoMaker.from(gatt.getDevice(), newState).toByteArray());
         }
