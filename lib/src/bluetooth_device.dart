@@ -37,6 +37,28 @@ class BluetoothDevice {
       });
     }
 
+    final newNameFuture = FlutterBlue.instance._methodStream
+        .where((m) => m.method == "DeviceConnected")
+        .map((m) => m.arguments)
+        .map((buffer) => new protos.BluetoothDevice.fromBuffer(buffer))
+        .where((p) => p.remoteId == id.toString())
+        .map((p) => p.name)
+        .first;
+
+    // Listen for MTU size update, which gets sent after connection success.
+    //
+    // On Android, if we don't wait for the MTU negotiation to complete, a
+    // subsequent operation, e.g. discoverServices, will collide with the MTU
+    // request and get dropped.
+
+    final mtuFuture = FlutterBlue.instance._methodStream
+        .where((m) => m.method == "MtuSize")
+        .map((m) => m.arguments)
+        .map((buffer) => new protos.MtuSizeResponse.fromBuffer(buffer))
+        .where((p) => p.remoteId == id.toString())
+        .map((p) => p.mtu)
+        .first;
+
     await FlutterBlue.instance._channel
         .invokeMethod('connect', request.writeToBuffer());
 
@@ -46,13 +68,9 @@ class BluetoothDevice {
 
     completer.complete();
 
-    final newName = await FlutterBlue.instance._methodStream
-        .where((m) => m.method == "DeviceConnected")
-        .map((m) => m.arguments)
-        .map((buffer) => new protos.BluetoothDevice.fromBuffer(buffer))
-        .where((p) => p.remoteId == id.toString())
-        .map((p) => p.name)
-        .first;
+    await mtuFuture;
+
+    final newName = await newNameFuture;
     if (newName.isNotEmpty) {
       name = newName;
     }
