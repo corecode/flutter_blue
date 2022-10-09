@@ -45,6 +45,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -89,6 +90,7 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
 
     static final private UUID CCCD_ID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private final Map<String, BluetoothDeviceCache> mDevices = new HashMap<>();
+    private final Set<String> mConnectWaitingForMtu = new HashSet<>();
     private LogLevel logLevel = LogLevel.EMERGENCY;
 
     private interface OperationOnPermission {
@@ -939,13 +941,17 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                 if(!mDevices.containsKey(gatt.getDevice().getAddress())) {
                     gatt.close();
                 }
+		invokeMethodUIThread("DeviceState", ProtoMaker.from(gatt.getDevice(), newState).toByteArray());
             } else if(newState == BluetoothProfile.STATE_CONNECTED) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+		    mConnectWaitingForMtu.add(gatt.getDevice().getAddress());
                     gatt.requestMtu(512);
                 }
-		invokeMethodUIThread("DeviceConnected", ProtoMaker.from(gatt.getDevice()).toByteArray());
+		if (!mConnectWaitingForMtu.contains(gatt.getDevice().getAddress())) {
+		    invokeMethodUIThread("DeviceConnected", ProtoMaker.from(gatt.getDevice()).toByteArray());
+		    invokeMethodUIThread("DeviceState", ProtoMaker.from(gatt.getDevice(), newState).toByteArray());
+		}
             }
-            invokeMethodUIThread("DeviceState", ProtoMaker.from(gatt.getDevice(), newState).toByteArray());
         }
 
         @Override
@@ -1069,6 +1075,11 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
                     if (cache != null) {
                         cache.mtu = mtu;
                     }
+		    if (mConnectWaitingForMtu.contains(gatt.getDevice().getAddress())) {
+			mConnectWaitingForMtu.remove(gatt.getDevice().getAddress());
+			invokeMethodUIThread("DeviceConnected", ProtoMaker.from(gatt.getDevice()).toByteArray());
+			invokeMethodUIThread("DeviceState", ProtoMaker.from(gatt.getDevice(), BluetoothProfile.STATE_CONNECTED).toByteArray());
+		    }
                     Protos.MtuSizeResponse.Builder p = Protos.MtuSizeResponse.newBuilder();
                     p.setRemoteId(gatt.getDevice().getAddress());
                     p.setMtu(mtu);
