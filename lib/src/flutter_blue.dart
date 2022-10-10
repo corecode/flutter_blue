@@ -62,6 +62,8 @@ class FlutterBlue {
 
   BehaviorSubject<List<ScanResult>> _scanResults = BehaviorSubject.seeded([]);
 
+  StreamController<ScanResult> _liveScanResults = StreamController.broadcast();
+
   /// Returns a stream that is a list of [ScanResult] results while a scan is in progress.
   ///
   /// The list emitted is all the scanned results as of the last initiated scan. When a scan is
@@ -70,6 +72,9 @@ class FlutterBlue {
   /// One use for [scanResults] is as the stream in a StreamBuilder to display the
   /// results of a scan in real time while the scan is in progress.
   Stream<List<ScanResult>> get scanResults => _scanResults.stream;
+
+  /// Returns a stream of [ScanResult] results while a scan is in progress.
+  Stream<ScanResult> get liveScanResults => _liveScanResults.stream;
 
   PublishSubject _stopScanPill = new PublishSubject();
 
@@ -156,6 +161,7 @@ class FlutterBlue {
         .map((buffer) => new protos.ScanResult.fromBuffer(buffer))
         .map((p) {
       final result = new ScanResult.fromProto(p);
+      _liveScanResults.add(result);
       final list = _scanResults.value;
       int index = list.indexOf(result);
       if (index != -1) {
