@@ -164,6 +164,7 @@ public class FlutterBluePlugin implements FlutterPlugin, MethodCallHandler, Requ
     private void tearDown() {
         synchronized (tearDownLock) {
             Log.d(TAG, "teardown");
+	    stopScan();
             context = null;
             channel.setMethodCallHandler(null);
             channel = null;
